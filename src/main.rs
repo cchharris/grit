@@ -2,6 +2,8 @@
 
 use std::env;
 
+mod string_list;
+
 const GIT_USAGE_STRING: &str = concat!(
     "grit [--version] [--help] [-C <path>] [-c <name>=<value>]\n",
     "           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]\n",
@@ -28,6 +30,12 @@ struct BuiltinOptions {
     support_super_prefix: bool,
     delay_pager_config: bool,
     no_parse_opt: bool,
+}
+
+struct Command {
+    cmd: &'static str,
+    fun_ptr: &'static dyn Fn(Vec<&str>, &str),
+    options: BuiltinOptions,
 }
 
 fn main() {
