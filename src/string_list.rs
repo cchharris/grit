@@ -103,6 +103,7 @@ impl<
 
     /**
         Port of unsorted_string_list_lookup
+        C version returns a pointer - we'll see if we need to change our return type
     **/
     pub fn unsorted_lookup(&self, lookup: &str) -> Option<&S> {
         for item in self.iter() {
@@ -284,5 +285,93 @@ mod test {
         assert_eq!(&third, dupe_sorted_iter.next().unwrap());
         assert_eq!(&second, dupe_sorted_iter.next().unwrap());
         assert_eq!(&first, dupe_sorted_iter.next().unwrap());
+    }
+
+    #[test]
+    fn keep_filtered_ref() {
+        let keep1 = "keep1";
+        let keep2 = "keep_number_2_1";
+        let filter = "dropme";
+
+        let mut list_ref = StringListRef::new();
+        list_ref.append(&keep1);
+        list_ref.append(&filter);
+        list_ref.append(&keep2);
+
+        let mut ref_prefilter_iter = list_ref.iter();
+        assert_eq!(&keep1, ref_prefilter_iter.next().unwrap());
+        assert_eq!(&filter, ref_prefilter_iter.next().unwrap());
+        assert_eq!(&keep2, ref_prefilter_iter.next().unwrap());
+
+        list_ref.keep_filtered(&((|s: &str| s.ends_with("1")) as fn(&str)->bool));
+
+        let mut ref_postfilter_iter = list_ref.iter();
+        assert_eq!(2, list_ref.list.len());
+        assert_eq!(&keep1, ref_postfilter_iter.next().unwrap());
+        assert_eq!(&keep2, ref_postfilter_iter.next().unwrap());
+    }
+
+    #[test]
+    fn keep_filtered_dupe() {
+        let keep1 = "keep1";
+        let keep2 = "keep_number_2_1";
+        let filter = "dropme";
+
+        let mut list_dupe = StringListDupe::new();
+        list_dupe.append(&keep1);
+        list_dupe.append(&filter);
+        list_dupe.append(&keep2);
+
+        let mut ref_prefilter_iter = list_dupe.iter();
+        assert_eq!(&keep1, ref_prefilter_iter.next().unwrap());
+        assert_eq!(&filter, ref_prefilter_iter.next().unwrap());
+        assert_eq!(&keep2, ref_prefilter_iter.next().unwrap());
+
+        list_dupe.keep_filtered(&((|s: &str| s.ends_with("1")) as fn(&str)->bool));
+
+        let mut ref_postfilter_iter = list_dupe.iter();
+        assert_eq!(2, list_dupe.list.len());
+        assert_eq!(&keep1, ref_postfilter_iter.next().unwrap());
+        assert_eq!(&keep2, ref_postfilter_iter.next().unwrap());
+    }
+
+    #[test]
+    fn unsorted_lookup_ref() {
+        let keep1 = "keep1";
+        let keep2 = "keep_number_2_1";
+        let filter = "dropme";
+
+        let mut list_ref = StringListRef::new();
+        list_ref.append(&keep1);
+        list_ref.append(&filter);
+        list_ref.append(&keep2);
+
+        let mut ref_prefilter_iter = list_ref.iter();
+        assert_eq!(&keep1, ref_prefilter_iter.next().unwrap());
+        assert_eq!(&filter, ref_prefilter_iter.next().unwrap());
+        assert_eq!(&keep2, ref_prefilter_iter.next().unwrap());
+
+        let find = list_ref.unsorted_lookup("dropme");
+        assert_eq!(&filter, find.unwrap());
+    }
+
+    #[test]
+    fn unsorted_lookup_dupe() {
+        let keep1 = "keep1";
+        let keep2 = "keep_number_2_1";
+        let filter = "dropme";
+
+        let mut list_dupe = StringListDupe::new();
+        list_dupe.append(&keep1);
+        list_dupe.append(&filter);
+        list_dupe.append(&keep2);
+
+        let mut ref_prefilter_iter = list_dupe.iter();
+        assert_eq!(&keep1, ref_prefilter_iter.next().unwrap());
+        assert_eq!(&filter, ref_prefilter_iter.next().unwrap());
+        assert_eq!(&keep2, ref_prefilter_iter.next().unwrap());
+
+        let find = list_dupe.unsorted_lookup("dropme");
+        assert_eq!(&filter, find.unwrap());
     }
 }
