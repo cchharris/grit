@@ -7,9 +7,9 @@
 	I'm trusting that Rust will steer us right if we try and use StringListRef and it becomes unsafe.
 **/
 
-pub struct StringListBase<'a, S> where S: AsRef<str> + From<&'a str> {
+pub struct StringListBase<'a, S> where S: AsRef<str> + From<&'a str> + Ord {
 	list: Vec<S>,
-	compare: Option<&'a dyn Fn(&str, &str) -> i32>,
+	compare: Option<&'a dyn Fn(&S, &S) -> std::cmp::Ordering>,
 }
 
 pub type StringListRef<'a> = StringListBase<'a, &'a str>;
@@ -17,10 +17,10 @@ pub type StringListDupe<'a> = StringListBase<'a, String>;
 
 // The function we're calling will not own the strings.
 // The git implementation has a void* cb_data.  Not filling this in until I know what it's for.'
-type StringListEachFunc = dyn Fn(&str) -> i32; 
-type StringListKeepFunc = dyn Fn(&str) -> bool;
+type StringListEachFunc = fn(&str) -> i32; 
+type StringListKeepFunc = fn(&str) -> bool;
 
-impl <'a, S: std::convert::AsRef<str> + std::convert::From<&'a str> + std::default::Default> StringListBase<'a, S> {
+impl <'a, S: std::convert::AsRef<str> + std::convert::From<&'a str> + std::default::Default + std::cmp::Ord> StringListBase<'a, S> {
 	fn new() -> StringListBase<'a, S> {
 		Self {
 			list: Vec::new(),
@@ -54,6 +54,15 @@ impl <'a, S: std::convert::AsRef<str> + std::convert::From<&'a str> + std::defau
 		}
 		self.list.truncate(count_dest);
 	}
+
+	fn sort(&mut self) {
+		self.list.sort_by(self.compare.unwrap_or(&(S::cmp as fn(&S, &S)->std::cmp::Ordering)))
+	}
+
+	fn unsorted_lookup(&self) {
+		let comparer = self.compare.unwrap_or(&(S::cmp as fn(&S, &S)->std::cmp::Ordering));
+	}
+
 	fn iter(&self) -> std::slice::Iter<'_, S> {
 		self.list.iter()
 	}
@@ -120,5 +129,88 @@ mod test {
 		assert_eq!(&"test2", iter.next().unwrap());
 		assert_eq!(&other, iter.next().unwrap());
 		assert_eq!(&"test4", iter.next().unwrap());
+	}
+
+	#[test]
+	fn sort() {
+		let first = "item1";
+		let second = "item1";
+		let third = "item1";
+
+		let mut list_ref = StringListRef::new();
+		let mut list_dupe = StringListDupe::new();
+
+		list_ref.append(&third);
+		list_ref.append(&first);
+		list_ref.append(&second);
+
+		let mut refUnsortedIter = list_ref.iter();
+		assert_eq!(&third, refUnsortedIter.next().unwrap());
+		assert_eq!(&first, refUnsortedIter.next().unwrap());
+		assert_eq!(&second, refUnsortedIter.next().unwrap());
+
+		list_dupe.append(&third);
+		list_dupe.append(&first);
+		list_dupe.append(&second);
+		let mut dupeUnsortedIter = list_dupe.iter();
+		assert_eq!(&third, dupeUnsortedIter.next().unwrap());
+		assert_eq!(&first, dupeUnsortedIter.next().unwrap());
+		assert_eq!(&second, dupeUnsortedIter.next().unwrap());
+
+		list_ref.sort();
+		let mut refSortedIter = list_ref.iter();
+		assert_eq!(&first, refSortedIter.next().unwrap());
+		assert_eq!(&second, refSortedIter.next().unwrap());
+		assert_eq!(&third, refSortedIter.next().unwrap());
+
+		list_dupe.sort();
+		let mut dupeSortedIter = list_dupe.iter();
+		assert_eq!(&first, dupeSortedIter.next().unwrap());
+		assert_eq!(&second, dupeSortedIter.next().unwrap());
+		assert_eq!(&third, dupeSortedIter.next().unwrap());
+	}
+
+	#[test]
+	fn sort_user_compare() {
+		let first = "item1";
+		let second = "item2";
+		let third = "item3";
+
+		let mut list_ref = StringListRef::new();
+		let list_ref_ordering: fn(&&str, &&str) -> std::cmp::Ordering = |a: &&str, b: &&str| { b.cmp(a) };
+		list_ref.compare = Some(&list_ref_ordering);
+		let mut list_dupe = StringListDupe::new();
+		let list_dupe_ordering:fn(&String, &String) -> std::cmp::Ordering = |a: &String, b: &String| { b.cmp(a) };
+		list_dupe.compare = Some(&list_dupe_ordering);
+		
+
+		list_ref.append(&third);
+		list_ref.append(&first);
+		list_ref.append(&second);
+
+		let mut refUnsortedIter = list_ref.iter();
+		assert_eq!(&third, refUnsortedIter.next().unwrap());
+		assert_eq!(&first, refUnsortedIter.next().unwrap());
+		assert_eq!(&second, refUnsortedIter.next().unwrap());
+
+		list_dupe.append(&third);
+		list_dupe.append(&first);
+		list_dupe.append(&second);
+		let mut dupeUnsortedIter = list_dupe.iter();
+		assert_eq!(&third, dupeUnsortedIter.next().unwrap());
+		assert_eq!(&first, dupeUnsortedIter.next().unwrap());
+		assert_eq!(&second, dupeUnsortedIter.next().unwrap());
+
+		list_ref.sort();
+		let mut refSortedIter = list_ref.iter();
+		assert_eq!(&third, refSortedIter.next().unwrap());
+		assert_eq!(&second, refSortedIter.next().unwrap());
+		assert_eq!(&first, refSortedIter.next().unwrap());
+
+		list_dupe.sort();
+		let mut dupeSortedIter = list_dupe.iter();
+		assert_eq!(&third, dupeSortedIter.next().unwrap());
+		assert_eq!(&second, dupeSortedIter.next().unwrap());
+		assert_eq!(&first, dupeSortedIter.next().unwrap());
 	}
 }
