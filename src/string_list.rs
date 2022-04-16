@@ -1,39 +1,39 @@
-/**
-    string_list is a C-like structure to hold a list of strings
-    We may or may dupe strings and thus own their memory, depending on a flag set at construction, and they may or may not be sorted
-    This flag appears to be set at initialization time - so we'll use generics/specializaiton and swap out the implementation.
+//!
+//! string_list is a C-like structure to hold a list of strings
+//! We may or may dupe strings and thus own their memory, depending on a flag set at construction, and they may or may not be sorted
+//! This flag appears to be set at initialization time - so we'll use generics/specializaiton and swap out the implementation.
+//!
+//! I'm going to model this by using String vs. &str, which are owned versus unowned strings, appropriately.
+//! I'm trusting that Rust will steer us right if we try and use StringListRef and it becomes unsafe.
+//!
 
-    I'm going to model this by using String vs. &str, which are owned versus unowned strings, appropriately.
-    I'm trusting that Rust will steer us right if we try and use StringListRef and it becomes unsafe.
-**/
-
-/**
-    Base class for string_lists.  We specialize for Strings, which are Duped, and &strs, which are referencing existing strings.
-
-**/
+///
+/// Base class for string_lists.  We specialize for Strings, which are Duped, and &strs, which are referencing existing strings.
+///
+///
 pub struct StringListBase<'a, S>
 where
     S: AsRef<str> + From<&'a str> + Ord,
 {
     list: Vec<S>,
-    /**
-     This is (&str, &str) to be unified whether we're Ref or Dupe
-     We can drop Strings to &strs, and beyond exotic sorting scenarios, we can expect similar behavior.
-    **/
+    ///
+    /// This is (&str, &str) to be unified whether we're Ref or Dupe
+    /// We can drop Strings to &strs, and beyond exotic sorting scenarios, we can expect similar behavior.
+    ///
     compare: Option<&'a dyn Fn(&str, &str) -> std::cmp::Ordering>,
 }
 
-/**
-    Replaces string_lists initialized with string_list_init_nodup
-**/
+///
+/// Replaces string_lists initialized with string_list_init_nodup
+///
 pub type StringListRef<'a> = StringListBase<'a, &'a str>;
-/**
-    Replaces string_lists initialized with string_list_init_dup
-**/
+///
+/// Replaces string_lists initialized with string_list_init_dup
+///
 pub type StringListDupe<'a> = StringListBase<'a, String>;
 
-// The function we're calling will not own the strings.
-// The git implementation has a void* cb_data.  Not filling this in until I know what it's for.
+/// The function we're calling will not own the strings.
+/// The git implementation has a void* cb_data.  Not filling this in until I know what it's for.
 pub type StringListEachFunc = fn(&str) -> i32;
 pub type StringListKeepFunc = fn(&str) -> bool;
 
@@ -52,16 +52,16 @@ impl<
         }
     }
 
-    /**
-        Port of string_list_clear
-    **/
+    ///
+    /// Port of string_list_clear
+    ///
     pub fn clear(&mut self) {
         self.list.clear();
     }
 
-    /**
-        Port of for_each_string_list
-    **/
+    ///
+    /// Port of for_each_string_list
+    ///
     pub fn for_each(&self, func: &StringListEachFunc) -> i32 {
         for item in self.list.iter() {
             let ret = func(item.as_ref());
@@ -72,9 +72,9 @@ impl<
         return 0;
     }
 
-    /**
-        Port of filter_string_list
-    **/
+    ///
+    /// Port of filter_string_list
+    ///
     pub fn keep_filtered(&mut self, func: &StringListKeepFunc) {
         let mut count_dest = 0;
         for i in 0..self.list.len() {
@@ -88,9 +88,9 @@ impl<
         self.list.truncate(count_dest);
     }
 
-    /**
-        Port of string_list_sort
-    **/
+    ///
+    /// Port of string_list_sort
+    ///
     pub fn sort(&mut self) {
         self.list.sort_by(|a: &S, b: &S| {
             self.compare
@@ -101,10 +101,10 @@ impl<
         });
     }
 
-    /**
-        Port of unsorted_string_list_lookup
-        C version returns a pointer - we'll see if we need to change our return type
-    **/
+    ///
+    /// Port of unsorted_string_list_lookup
+    /// C version returns a pointer - we'll see if we need to change our return type
+    ///
     pub fn unsorted_lookup(&self, lookup: &str) -> Option<&S> {
         for item in self.iter() {
             if self
@@ -120,37 +120,121 @@ impl<
         return None;
     }
 
-    /**
-        New Addition
-    **/
+    ///
+    /// Port of unsorted_string_list_has_string
+    ///
+    pub fn unsorted_has_string(&self, lookup: &str) -> bool {
+        self.unsorted_lookup(&lookup).is_some()
+    }
+
+    ///
+    /// Port of unsorted_string_list_delete_item
+    ///
+    pub fn unsorted_delete(&mut self, index: usize) {
+        self.list.swap_remove(index); // Pretty much exactly the by-hand implementation
+    }
+
+    ///
+    /// New Addition
+    ///
     pub fn iter(&self) -> std::slice::Iter<'_, S> {
         self.list.iter()
     }
 }
 
-/**
-    Specialized impls for those methods which only work in no-dupe land
-**/
+///
+/// Specialized impls for those methods which only work in no-dupe land
+///
+///  I don't know if it's possible to test for compile_fail outside a doctest
+///
+/// ```compile_fail
+/// let mut list_ref = StringListRef::new();
+/// {
+///   list_ref.append(&String::from("text"))
+/// }
+/// ```
 impl<'a> StringListRef<'a> {
-    /**
-        Port of string_list_append
-    **/
+    ///  Port of string_list_append
+    ///
     pub fn append(&mut self, str_in: &'a str) {
         self.list.push(str_in)
     }
+
+    ///
+    /// Port of string_list_split_in_place
+    ///
+    /// CAUTION: We don't actually modify [string]
+    ///
+    pub fn split_in_place(&mut self, string: &'a mut str, delim: char, max_split: i32) -> usize {
+        let mut substr = &string[0..];
+        let mut count: usize = 0;
+        loop {
+            count += 1;
+            // TODO
+            if max_split >= 0 && count > max_split.try_into().unwrap() {
+                self.append(substr);
+                return count;
+            }
+            match substr.find(delim) {
+                Some(i) => {
+                    let copy = &substr[0..i];
+                    self.append(copy);
+                    //substr[i] = char::default();
+                    match substr.get(i + 1..) {
+                        Some(s) => substr = s,
+                        None => return count,
+                    }
+                }
+                None => {
+                    self.append(substr);
+                    return count;
+                }
+            }
+        }
+    }
 }
 
-/**
-    Specialized imples for those methods which only work in dupe land
-**/
+///
+/// Specialized imples for those methods which only work in dupe land
+///
 impl<'a> StringListDupe<'a> {
-    /**
-        Port of string_list_append
-
-        This is more permissive than StringListRef::apend, since we can accept a different lifetime than our own (generally smaller), since we duplicate it
-    **/
+    ///
+    /// Port of string_list_append
+    ///
+    /// This is more permissive than StringListRef::apend, since we can accept a different lifetime than our own (generally smaller), since we duplicate it
+    ///
     pub fn append<'b>(&mut self, str_in: &'b str) {
         self.list.push(String::from(str_in))
+    }
+
+    ///
+    /// Port of string_list_split
+    ///
+    pub fn split(&mut self, string: &str, delim: char, max_split: i32) -> usize {
+        let mut substr = &string[0..];
+        let mut count: usize = 0;
+        loop {
+            count += 1;
+            // TODO
+            if max_split >= 0 && count > max_split.try_into().unwrap() {
+                self.append(substr);
+                return count;
+            }
+            match substr.find(delim) {
+                Some(i) => {
+                    let copy = &substr[0..i];
+                    self.append(copy);
+                    match substr.get(i + 1..) {
+                        Some(s) => substr = s,
+                        None => return count,
+                    }
+                }
+                None => {
+                    self.append(substr);
+                    return count;
+                }
+            }
+        }
     }
 }
 
@@ -303,7 +387,7 @@ mod test {
         assert_eq!(&filter, ref_prefilter_iter.next().unwrap());
         assert_eq!(&keep2, ref_prefilter_iter.next().unwrap());
 
-        list_ref.keep_filtered(&((|s: &str| s.ends_with("1")) as fn(&str)->bool));
+        list_ref.keep_filtered(&((|s: &str| s.ends_with("1")) as fn(&str) -> bool));
 
         let mut ref_postfilter_iter = list_ref.iter();
         assert_eq!(2, list_ref.list.len());
@@ -327,7 +411,55 @@ mod test {
         assert_eq!(&filter, ref_prefilter_iter.next().unwrap());
         assert_eq!(&keep2, ref_prefilter_iter.next().unwrap());
 
-        list_dupe.keep_filtered(&((|s: &str| s.ends_with("1")) as fn(&str)->bool));
+        list_dupe.keep_filtered(&((|s: &str| s.ends_with("1")) as fn(&str) -> bool));
+
+        let mut ref_postfilter_iter = list_dupe.iter();
+        assert_eq!(2, list_dupe.list.len());
+        assert_eq!(&keep1, ref_postfilter_iter.next().unwrap());
+        assert_eq!(&keep2, ref_postfilter_iter.next().unwrap());
+    }
+
+    #[test]
+    fn delete_ref() {
+        let keep1 = "keep1";
+        let keep2 = "keep_number_2_1";
+        let delete = "dropme";
+
+        let mut list_ref = StringListRef::new();
+        list_ref.append(&keep1);
+        list_ref.append(&delete);
+        list_ref.append(&keep2);
+
+        let mut ref_prefilter_iter = list_ref.iter();
+        assert_eq!(&keep1, ref_prefilter_iter.next().unwrap());
+        assert_eq!(&delete, ref_prefilter_iter.next().unwrap());
+        assert_eq!(&keep2, ref_prefilter_iter.next().unwrap());
+
+        list_ref.unsorted_delete(1);
+
+        let mut ref_postfilter_iter = list_ref.iter();
+        assert_eq!(2, list_ref.list.len());
+        assert_eq!(&keep1, ref_postfilter_iter.next().unwrap());
+        assert_eq!(&keep2, ref_postfilter_iter.next().unwrap());
+    }
+
+    #[test]
+    fn delete_dupe() {
+        let keep1 = "keep1";
+        let keep2 = "keep_number_2_1";
+        let delete = "dropme";
+
+        let mut list_dupe = StringListDupe::new();
+        list_dupe.append(&keep1);
+        list_dupe.append(&delete);
+        list_dupe.append(&keep2);
+
+        let mut ref_prefilter_iter = list_dupe.iter();
+        assert_eq!(&keep1, ref_prefilter_iter.next().unwrap());
+        assert_eq!(&delete, ref_prefilter_iter.next().unwrap());
+        assert_eq!(&keep2, ref_prefilter_iter.next().unwrap());
+
+        list_dupe.unsorted_delete(1);
 
         let mut ref_postfilter_iter = list_dupe.iter();
         assert_eq!(2, list_dupe.list.len());
@@ -373,5 +505,55 @@ mod test {
 
         let find = list_dupe.unsorted_lookup("dropme");
         assert_eq!(&filter, find.unwrap());
+    }
+
+    #[test]
+    fn split_in_place_ref() {
+        let split_me_base = "I should be split on spaces";
+        let mut split_me = String::from(split_me_base);
+        let split_1 = "I";
+        let split_2 = "should";
+        let split_3 = "be";
+        let split_4 = "split";
+        let split_5 = "on";
+        let split_6 = "spaces";
+
+        let mut list_ref = StringListRef::new();
+        list_ref.split_in_place(split_me.as_mut_str(), ' ', i32::MAX);
+
+        assert_eq!(list_ref.list.len(), 6);
+
+        let mut iter = list_ref.iter();
+        // assert_ne!(split_me.as_str(), split_me_base); // Can't actually compare this - since we modified split_me, we can't borrow it again
+        assert_eq!(&split_1, iter.next().unwrap());
+        assert_eq!(&split_2, iter.next().unwrap());
+        assert_eq!(&split_3, iter.next().unwrap());
+        assert_eq!(&split_4, iter.next().unwrap());
+        assert_eq!(&split_5, iter.next().unwrap());
+        assert_eq!(&split_6, iter.next().unwrap());
+    }
+
+    #[test]
+    fn split_dupe() {
+        let split_me = "I should be split on spaces";
+        let split_1 = "I";
+        let split_2 = "should";
+        let split_3 = "be";
+        let split_4 = "split";
+        let split_5 = "on";
+        let split_6 = "spaces";
+
+        let mut list_dupe = StringListDupe::new();
+        list_dupe.split(&split_me, ' ', i32::MAX);
+
+        assert_eq!(list_dupe.list.len(), 6);
+
+        let mut iter = list_dupe.iter();
+        assert_eq!(&split_1, iter.next().unwrap());
+        assert_eq!(&split_2, iter.next().unwrap());
+        assert_eq!(&split_3, iter.next().unwrap());
+        assert_eq!(&split_4, iter.next().unwrap());
+        assert_eq!(&split_5, iter.next().unwrap());
+        assert_eq!(&split_6, iter.next().unwrap());
     }
 }
