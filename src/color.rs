@@ -73,33 +73,25 @@ pub const COLOR_FOREGROUND_RGB: i32 = 38;
 pub const COLOR_FOREGROUND_256: i32 = 38;
 pub const COLOR_FOREGROUND_BRIGHT_ANSI: i32 = 90;
 
-enum ColorType {
-	ColorUnspecified = 0,
-	ColorNormal = 1,
-	ColorAnsi = 2, /* basic 0-7 ANSI colors + "default" (value = 9) */
-	Color256 = 3,
-	ColorRGB = 4,
+
+struct ValueColor {
+	value: u8
 }
 
-pub struct Color {
-	color_type: ColorType, 
-	value: u8,
+struct ValueRGB {
 	red: u8,
 	green: u8,
 	blue: u8
 }
 
-/**
-	https://github.com/git/git/commit/e49521b56d8715f46b93ee6bc95f7de9c6858365
-	Git seems to use a lookup table to get the int value of a character
-	We can use to_digit with a hex radix, and map Nones to the git value of (uint)-1
-	TODO: We might want to look for None instead of a (uint)-1 flag.
-**/
-fn hexval(c: char) -> u32 {
-	c.to_digit(16).unwrap_or_else(u32::max_value)
+enum Color {
+	Unspecified,
+	Normal,
+	Ansi(ValueColor),
+	U256(ValueColor), // U required since identifiers can't start with a number
+	RGB(ValueRGB)
 }
 
-impl Color {
 /*
 	Is this even required??
 	https://www.ibm.com/docs/en/i/7.2?topic=functions-strncasecmp-compare-strings-without-case-sensitivity
@@ -119,4 +111,184 @@ impl Color {
 	}
 */
 
+/**
+	https://github.com/git/git/commit/e49521b56d8715f46b93ee6bc95f7de9c6858365
+	Git seems to use a lookup table to get the int value of a character
+	We can use to_digit with a hex radix, and map Nones to the git value of (uint)-1
+**/
+fn try_hexval(c: char) -> Option<u32> {
+	c.to_digit(16)
+}
+
+/**
+Original code:
+	static int get_hex_color(const char *in, unsigned char *out)
+	{
+		unsigned int val;
+		val = (hexval(in[0]) << 4) | hexval(in[1]);
+		if (val & ~0xff)
+			return -1;
+		*out = val;
+		return 0;
+	}
+
+We swap to a char tuple, since we need two values
+chars are 4 bytes though, so we'll see if this is typing we want to keep
+
+
+if (val & ~0xff) is a fancy way of saying any bits set above 0b000000011111111
+Aka. either of these hexvals returned (uint)-1 
+We can just check for > 255 as well
+And instead of returning a flag value and passing a location, return an Option
+**/
+fn try_get_hex_color(i: (char, char)) -> Option<u32> {
+	let mut val;
+	match try_hexval(i.0) {
+		Some(a) => val = a << 4,
+		None => return None,
+	}
+	match try_hexval(i.1) {
+		Some(a) => val |= a,
+		None => return None,
+	}
+	if val <= u8::MAX.into() {
+		Some(val)
+	}
+	else {None}
+}
+
+impl ValueColor {
+	fn new(val: u8)  -> Self {
+		Self {
+			value: val,
+		}
+	}
+}
+
+
+impl Color {
+
+	fn try_parse_ansi_color(name: &str, len: usize) -> Option<Color> {
+		/* Positions in array must match ANSI color codes */
+		const COLOR_NAMES: [&str; 8]= [
+			"black", "red", "green", "yellow",
+			"blue", "magenta", "cyan", "white"
+		];
+
+		let mut color_offset = COLOR_FOREGROUND_ANSI;
+
+		if name[0..usize::min(len, name.len())].eq_ignore_ascii_case("default") {
+			return Some(Color::Ansi(ValueColor::new((color_offset + 9).try_into().unwrap())));
+		}
+
+		let mut color_name = &name[..];
+		let mut name_len = usize::min(len, color_name.len());
+		if color_name[0..usize::min(6, name_len)].eq_ignore_ascii_case("bright") {
+			color_offset = COLOR_FOREGROUND_BRIGHT_ANSI;
+			color_name = &name[6..];
+			name_len -= 6;
+		}
+		for (i, color) in COLOR_NAMES.iter().enumerate() {
+			if color_name[0..name_len].eq_ignore_ascii_case(color) {
+				return Some(Color::Ansi(ValueColor::new((color_offset + i32::try_from(i).unwrap()).try_into().unwrap())));
+			}
+		}
+		None
+	}
+
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+	#[test]
+	fn test_hexval() {
+		let numbers = '0'..='9';
+		let numbers_result = 0..=9;
+		let letters = 'a'..='z';
+		let letters_upper = 'A'..='Z';
+		let letters_result = [Some(10), Some(11), Some(12), Some(13), Some(14), Some(15), None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None];
+
+		let mut numbers_result_it = numbers_result.into_iter();
+		for num in numbers {
+			assert_eq!(try_hexval(num), Some(numbers_result_it.next().unwrap()));
+		}
+
+		let mut letters_result_iter = letters_result.iter();
+		for letter in letters {
+			assert_eq!(try_hexval(letter), *letters_result_iter.next().unwrap());
+		}
+
+		let mut letters_result_iter = letters_result.iter();
+		for letter in letters_upper {
+			assert_eq!(try_hexval(letter), *letters_result_iter.next().unwrap());
+		}
+	}
+
+	#[test]
+	fn test_get_hex_color() {
+		let test_0 = ('0', '0');
+		let test_0_ret = 0u32;
+		assert_eq!(try_get_hex_color(test_0), Some(test_0_ret));
+
+		let test_1 = ('z', '0');
+		assert_eq!(try_get_hex_color(test_1), None);
+
+		let test_2 = ('0', 'z');
+		assert_eq!(try_get_hex_color(test_2), None);
+
+		let test_3 = ('f', 'f');
+		let test_3_ret = u8::MAX.into();
+		assert_eq!(try_get_hex_color(test_3), Some(test_3_ret));
+
+		let test_4 = ('4', '4');
+		let test_4_ret = (4*16) + 4;
+		assert_eq!(try_get_hex_color(test_4), Some(test_4_ret));
+	}
+
+	#[test]
+	fn test_try_parse_ansi_color() {
+		let default = "default";
+		let default_res = Color::try_parse_ansi_color(default, default.len());
+		match default_res {
+			Some(Color::Ansi(inner)) => assert_eq!(inner.value, (COLOR_FOREGROUND_ANSI + 9).try_into().unwrap()),
+			_ => assert!(false),
+		}
+
+		let green = "green";
+		let green_res = Color::try_parse_ansi_color(green, 255);
+		match green_res {
+			Some(Color::Ansi(inner)) => assert_eq!(inner.value, (COLOR_FOREGROUND_ANSI + 2).try_into().unwrap()),
+			_ => assert!(false),
+		}
+
+		let brightgreen = "brightgreen";
+		let brightgreen_res = Color::try_parse_ansi_color(brightgreen, 255);
+		match brightgreen_res {
+			Some(Color::Ansi(inner)) => assert_eq!(inner.value, (COLOR_FOREGROUND_BRIGHT_ANSI + 2).try_into().unwrap()),
+			_ => assert!(false),
+		}
+
+		let typogreen = "brigtgreen";
+		let typogreen_res = Color::try_parse_ansi_color(typogreen, 255);
+		match typogreen_res {
+			None => assert!(true),
+			_ => assert!(false),
+		}
+
+		let shortgreen = "brightgreen";
+		let shortgreen_res = Color::try_parse_ansi_color(shortgreen, 6);
+		match shortgreen_res {
+			None => assert!(true),
+			_ => assert!(false),
+		}
+
+		let shortergreen = "brightgreen";
+		let shortergreen_res = Color::try_parse_ansi_color(shortergreen, 5);
+		match shortergreen_res {
+			None => assert!(true),
+			_ => assert!(false),
+		}
+	}
 }
