@@ -3,6 +3,7 @@
 use std::env;
 
 mod string_list;
+mod color;
 
 const GIT_USAGE_STRING: &str = concat!(
     "grit [--version] [--help] [-C <path>] [-c <name>=<value>]\n",
